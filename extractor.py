@@ -238,6 +238,166 @@ def pyomo2json(model, termination_condition='Unknown'):
     return model_dict
 
 
+def gurobi2json(model, termination_condition='Unknown'):
+    """
+    Convert a Gurobipy model to a JSON string compatible with OptiChat.
+    """
+    try:
+        import gurobipy as gp
+        from gurobipy import GRB
+    except ImportError:
+        raise ImportError("gurobipy is required for Gurobi model support")
+    
+    model_dict = {}
+    model_dict["model class"] = model
+    model_dict["model status"] = termination_condition
+    model_dict["model type"] = "LP"
+    model_dict["model description"] = None
+    model_dict["components"] = {}
+    
+    # Extract metadata if available (user should provide this in model file)
+    metadata = getattr(model, '_optichat_metadata', {})
+    
+    # Sets extraction
+    model_dict["components"]["sets"] = {}
+    sets_info = metadata.get('sets', {})
+    for set_name, set_data in sets_info.items():
+        set_dict = {
+            'name': set_name,
+            'is_indexed': False,
+            'description': set_data.get('description', f'Set {set_name}')
+        }
+        model_dict["components"]["sets"][set_name] = set_dict
+    
+    # Parameters extraction
+    model_dict["components"]["parameters"] = {}
+    params_info = metadata.get('parameters', {})
+    for param_name, param_data in params_info.items():
+        param_dict = {
+            'name': param_name,
+            'is_indexed': param_data.get('is_indexed', False),
+            'index_set': param_data.get('index_set', None),
+            'is_RHS': param_data.get('is_RHS', True),
+            'is_mutable': param_data.get('is_mutable', True),
+            'cons_in': set(param_data.get('cons_in', [])),
+            'description': param_data.get('description', f'Parameter {param_name}')
+        }
+        model_dict["components"]["parameters"][param_name] = param_dict
+    
+    # Variables extraction
+    model_dict["components"]["variables"] = {}
+    variables = model.getVars()
+    
+    # Group variables by base name (before index)
+    var_groups = {}
+    for var in variables:
+        var_name = var.VarName
+        # Parse variable name to extract base name and indices
+        if '[' in var_name:
+            base_name = var_name.split('[')[0]
+            index_str = var_name.split('[')[1].split(']')[0]
+            indices = tuple(index_str.split(',')) if ',' in index_str else (index_str,)
+        else:
+            base_name = var_name
+            indices = None
+        
+        if base_name not in var_groups:
+            var_groups[base_name] = {
+                'indices': [],
+                'is_binary': var.VType == GRB.BINARY,
+                'is_integer': var.VType in [GRB.INTEGER, GRB.BINARY]
+            }
+        if indices:
+            var_groups[base_name]['indices'].append(indices)
+    
+    for var_name, var_info in var_groups.items():
+        var_dict = {
+            'name': var_name,
+            'is_indexed': len(var_info['indices']) > 0,
+            'index_set': var_info['indices'] if var_info['indices'] else None,
+            'cons_in': set(),
+            'description': metadata.get('variables', {}).get(var_name, {}).get('description', f'Variable {var_name}')
+        }
+        model_dict["components"]["variables"][var_name] = var_dict
+        
+        # Check if model is IP
+        if model_dict["model type"] != "IP" and var_info['is_binary']:
+            model_dict["model type"] = "IP"
+    
+    # Constraints extraction
+    model_dict["components"]["constraints"] = {}
+    constraints = model.getConstrs()
+    
+    # Group constraints by base name
+    con_groups = {}
+    for con in constraints:
+        con_name = con.ConstrName
+        # Parse constraint name to extract base name and indices
+        if '[' in con_name:
+            base_name = con_name.split('[')[0]
+            index_str = con_name.split('[')[1].split(']')[0]
+            indices = tuple(index_str.split(',')) if ',' in index_str else (index_str,)
+        else:
+            base_name = con_name
+            indices = None
+        
+        if base_name not in con_groups:
+            con_groups[base_name] = {
+                'indices': [],
+                'vars_in': set(),
+                'params_in': set()
+            }
+        if indices:
+            con_groups[base_name]['indices'].append(indices)
+        
+        # Extract variables from constraint
+        row = model.getRow(con)
+        for i in range(row.size()):
+            var = row.getVar(i)
+            var_base_name = var.VarName.split('[')[0] if '[' in var.VarName else var.VarName
+            con_groups[base_name]['vars_in'].add(var_base_name)
+    
+    for con_name, con_info in con_groups.items():
+        con_dict = {
+            'name': con_name,
+            'is_indexed': len(con_info['indices']) > 0,
+            'index_set': con_info['indices'] if con_info['indices'] else None,
+            'params_in': metadata.get('constraints', {}).get(con_name, {}).get('params_in', set()),
+            'vars_in': con_info['vars_in'],
+            'description': metadata.get('constraints', {}).get(con_name, {}).get('description', f'Constraint {con_name}')
+        }
+        model_dict["components"]["constraints"][con_name] = con_dict
+        
+        # Update which constraints each variable appears in
+        for var_name in con_info['vars_in']:
+            if var_name in model_dict["components"]["variables"]:
+                model_dict["components"]["variables"][var_name]["cons_in"].add(con_name)
+    
+    # Objective extraction
+    model_dict["components"]["objective"] = {}
+    obj = model.getObjective()
+    obj_name = metadata.get('objective', {}).get('name', 'obj')
+    
+    obj_dict = {
+        'name': obj_name,
+        'sense': 'minimize' if model.ModelSense == GRB.MINIMIZE else 'maximize',
+        'is_indexed': False,
+        'description': metadata.get('objective', {}).get('description', 'Objective function')
+    }
+    
+    if termination_condition in [TerminationCondition.infeasible, TerminationCondition.infeasibleOrUnbounded]:
+        obj_dict["optimal_value"] = "N/A due to infeasibility"
+    else:
+        try:
+            obj_dict["optimal_value"] = model.ObjVal
+        except:
+            obj_dict["optimal_value"] = "N/A"
+    
+    model_dict["components"]["objective"][obj_name] = obj_dict
+    
+    return model_dict
+
+
 def iis2json(ilp_path, model_dict):
     constr_names = set()
     iis_dict = {}
@@ -284,27 +444,78 @@ def initial_loading(file, is_uploaded=True):
         module = importlib.import_module(directory_path + '.' + model_name)
         model = module.model
 
-    ilp_path = ""
-    solver = SolverFactory('gurobi')
-    results = solver.solve(model, tee=True)
-    status = results.solver.status
-    termination_condition = results.solver.termination_condition
+    # Detect model framework type by analyzing imports in the code
+    model_framework = detect_model_framework(code)
+    print(f"Detected model framework: {model_framework}")
+    
+    # Create appropriate adapter
+    from model_adapter import create_adapter
+    adapter = create_adapter(model, code, model_framework)
+    
+    # Solve the model using the adapter
+    status, termination_condition = adapter.solve()
     print(f"Model {model_name} loaded, "
           f"Solver Status: {status}, Termination Condition: {termination_condition}")
 
+    # Handle IIS extraction for infeasible models
+    ilp_path = ""
     if termination_condition in [TerminationCondition.infeasible, TerminationCondition.infeasibleOrUnbounded]:
         if not os.path.exists(f'logs/ilps'):
             os.makedirs(f'logs/ilps')
-        ilp_name = write_iis(model, 'logs/ilps/' + model_name + ".ilp", solver="gurobi")
         ilp_path = os.path.abspath('logs/ilps/' + model_name + ".ilp")
+        adapter.extract_iis(ilp_path)
         print('model name:', model_name)
-        print(f'ilp name: {ilp_name}, ilp path: {ilp_path}')
+        print(f'ilp path: {ilp_path}')
 
-    model_dict = pyomo2json(model, termination_condition=termination_condition)
+    # Convert model to JSON representation
+    model_dict = adapter.to_json()
     model_dict = iis2json(ilp_path, model_dict)
-    model_dict.update({'code': code})
+    model_dict.update({'code': code, 'model_framework': model_framework})
     models_dict = {'model_representation': {}, 'model_1': model_dict, }
     return models_dict, code
+
+
+def detect_model_framework(code: str) -> str:
+    """
+    Detect whether the model is Pyomo or Gurobipy based on import statements.
+    
+    Args:
+        code: Source code as string
+        
+    Returns:
+        'pyomo' or 'gurobi'
+    """
+    code_lower = code.lower()
+    
+    # Check for Gurobi imports
+    gurobi_patterns = [
+        'import gurobipy',
+        'from gurobipy',
+        'import gurobi',
+        'from gurobi'
+    ]
+    
+    # Check for Pyomo imports
+    pyomo_patterns = [
+        'import pyomo',
+        'from pyomo'
+    ]
+    
+    has_gurobi = any(pattern in code_lower for pattern in gurobi_patterns)
+    has_pyomo = any(pattern in code_lower for pattern in pyomo_patterns)
+    
+    if has_gurobi and not has_pyomo:
+        return 'gurobi'
+    elif has_pyomo and not has_gurobi:
+        return 'pyomo'
+    elif has_gurobi and has_pyomo:
+        # If both are present, prioritize based on which appears first
+        gurobi_pos = min([code_lower.find(p) for p in gurobi_patterns if p in code_lower])
+        pyomo_pos = min([code_lower.find(p) for p in pyomo_patterns if p in code_lower])
+        return 'gurobi' if gurobi_pos < pyomo_pos else 'pyomo'
+    else:
+        # Default to Pyomo for backward compatibility
+        return 'pyomo'
 
 
 def iis_translation(model_dict):

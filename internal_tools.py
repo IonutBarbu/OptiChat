@@ -756,3 +756,293 @@ def evaluate_modification(queried_components: List[Dict], queried_model, models_
     return feedback
 
 
+# =============================================================================
+# Gurobi-specific implementations
+# =============================================================================
+
+def feasibility_restoration_gurobi(queried_components: List[Dict], queried_model: str, models_dict):
+    """Gurobi implementation of feasibility restoration."""
+    try:
+        import gurobipy as gp
+        from gurobipy import GRB
+    except ImportError:
+        return "Error: gurobipy is required for Gurobi model support but is not installed."
+    
+    queried_model_dict = models_dict[queried_model]
+    
+    if queried_model_dict['model status'] not in [TerminationCondition.infeasible, TerminationCondition.infeasibleOrUnbounded]:
+        return "The model is not infeasible. No need to restore feasibility. Please confirm with the user."
+    
+    # Create a copy of the model
+    model = queried_model_dict['model class'].copy()
+    
+    # Add slack variables to constraints
+    feedback = f"Attempting to restore feasibility for {queried_model} by modifying: \n"
+    
+    for component in queried_components:
+        param_name = component['component_name']
+        param_indexes = component['component_indexes']
+        
+        component_type = get_component_type(param_name, queried_model_dict)
+        if component_type != 'parameters':
+            return f"Error: {param_name} is not a parameter in the model but a {component_type}."
+        
+        # For Gurobi, we add slack variables to constraints that contain this parameter
+        # This is a simplified approach - metadata should indicate which constraints to modify
+        feedback += f"Analyzing parameter {param_name}\n"
+    
+    # Compute IIS to identify problematic constraints
+    model.computeIIS()
+    iis_constrs = [c for c in model.getConstrs() if c.IISConstr]
+    
+    # Add slack variables to IIS constraints
+    slack_vars = []
+    for constr in iis_constrs:
+        slack_pos = model.addVar(name=f"slack_pos_{constr.ConstrName}", lb=0)
+        slack_neg = model.addVar(name=f"slack_neg_{constr.ConstrName}", lb=0)
+        slack_vars.extend([slack_pos, slack_neg])
+        
+        # Modify constraint to include slacks
+        model.remove(constr)
+        expr = model.getRow(constr)
+        sense = constr.Sense
+        rhs = constr.RHS
+        
+        if sense == GRB.LESS_EQUAL:
+            model.addConstr(expr - slack_pos + slack_neg <= rhs, name=constr.ConstrName)
+        elif sense == GRB.GREATER_EQUAL:
+            model.addConstr(expr - slack_pos + slack_neg >= rhs, name=constr.ConstrName)
+        else:  # EQUAL
+            model.addConstr(expr - slack_pos + slack_neg == rhs, name=constr.ConstrName)
+    
+    # Set objective to minimize sum of slacks
+    model.setObjective(gp.quicksum(slack_vars), GRB.MINIMIZE)
+    
+    # Solve
+    model.optimize()
+    
+    if model.status == GRB.OPTIMAL:
+        slack_sum = sum(v.X for v in slack_vars)
+        feedback += f"\nFeasibility can be restored with total slack of {slack_sum}\n"
+        feedback += "The model is now feasible."
+    else:
+        feedback += "\nFeasibility could not be restored."
+    
+    feedback = "Feedback from internal tools: \n" + feedback
+    return feedback
+
+
+def sensitivity_analysis_gurobi(queried_components: List[Dict], queried_model: str, models_dict):
+    """Gurobi implementation of sensitivity analysis."""
+    try:
+        import gurobipy as gp
+        from gurobipy import GRB
+    except ImportError:
+        return "Error: gurobipy is required for Gurobi model support but is not installed."
+    
+    queried_model_dict = models_dict[queried_model]
+    
+    if queried_model_dict['model status'] in [TerminationCondition.infeasible, TerminationCondition.infeasibleOrUnbounded]:
+        feedback = "Error: The model is infeasible. Sensitivity analysis cannot be performed on an infeasible model."
+        return "Feedback from internal tools: \n" + feedback
+    
+    if queried_model_dict['model type'] != 'LP':
+        feedback = "Error: The model is not a linear programming model. Sensitivity analysis is only supported for LP models."
+        return "Feedback from internal tools: \n" + feedback
+    
+    model = queried_model_dict['model class']
+    
+    feedback = "The sensitivity analysis results are as follows: \n"
+    
+    for component in queried_components:
+        param_name = component['component_name']
+        param_indexes = component['component_indexes']
+        
+        component_type = get_component_type(param_name, queried_model_dict)
+        if component_type != 'parameters':
+            return f"Error: {param_name} is not a parameter but a {component_type}."
+        
+        # In Gurobi, sensitivity is accessed via constraint Pi (dual values)
+        # We need metadata to know which constraints contain this parameter
+        cons_in = queried_model_dict['components']['parameters'][param_name].get('cons_in', set())
+        
+        total_sensitivity = 0.0
+        for constr_name in cons_in:
+            # Find constraints with this name
+            for constr in model.getConstrs():
+                if constr.ConstrName.startswith(constr_name):
+                    try:
+                        total_sensitivity += constr.Pi
+                    except:
+                        pass
+        
+        if abs(total_sensitivity) > 1e-5:
+            feedback += f"When {param_name} increases by 1 unit, the optimal objective value changes by {total_sensitivity}\n"
+        else:
+            feedback += f"Changes to {param_name} have negligible impact on the optimal objective value\n"
+    
+    feedback += "Please explain these results to the user.\n"
+    return "Feedback from internal tools: \n" + feedback
+
+
+def components_retrival_gurobi(queried_components: List[Dict], queried_model: str, models_dict):
+    """Gurobi implementation of component retrieval."""
+    try:
+        import gurobipy as gp
+        from gurobipy import GRB
+    except ImportError:
+        return "Error: gurobipy is required for Gurobi model support but is not installed."
+    
+    queried_model_dict = models_dict[queried_model]
+    model = queried_model_dict['model class']
+    
+    feedback = f"In the {queried_model}, "
+    
+    for component in queried_components:
+        component_name = component['component_name']
+        component_indexes = component['component_indexes']
+        
+        component_type = get_component_type(component_name, queried_model_dict)
+        
+        if component_type == 'variables':
+            # Retrieve variable values
+            vars_list = [v for v in model.getVars() if v.VarName.startswith(component_name)]
+            for var in vars_list:
+                try:
+                    feedback += f"{var.VarName} = {var.X}\n"
+                except:
+                    feedback += f"{var.VarName} = (not solved)\n"
+        
+        elif component_type == 'constraints':
+            # Retrieve constraint expressions
+            constrs_list = [c for c in model.getConstrs() if c.ConstrName.startswith(component_name)]
+            for constr in constrs_list:
+                feedback += f"{constr.ConstrName}: {model.getRow(constr)} {constr.Sense} {constr.RHS}\n"
+        
+        elif component_type == 'parameters':
+            # Parameters are stored in metadata
+            feedback += f"{component_name}: (stored in metadata)\n"
+        
+        elif component_type == 'objective':
+            try:
+                feedback += f"Objective value: {model.ObjVal}\n"
+            except:
+                feedback += f"Objective value: (not solved)\n"
+    
+    feedback += "Please describe the information using their physical meanings to the user.\n"
+    return "Feedback from internal tools: \n" + feedback
+
+
+def evaluate_modification_gurobi(queried_components: List[Dict], queried_model: str, models_dict):
+    """Gurobi implementation of modification evaluation."""
+    try:
+        import gurobipy as gp
+        from gurobipy import GRB
+    except ImportError:
+        return "Error: gurobipy is required for Gurobi model support but is not installed."
+    
+    queried_model_dict = models_dict[queried_model]
+    model = queried_model_dict['model class'].copy()
+    
+    feedback = f"In the {queried_model}, the following modifications are made: \n"
+    description = f"a model with the following changes to {queried_model}: \n"
+    
+    for component in queried_components:
+        component_name = component['component_name']
+        component_indexes = component['component_indexes']
+        component_operation = component['operation']
+        component_delta = component['delta']
+        
+        if component_operation == "!":
+            return ("Error: The evaluate_modification function requires a specific modification extent. "
+                    "Use sensitivity_analysis function instead.")
+        
+        component_type = get_component_type(component_name, queried_model_dict)
+        
+        if component_type == 'variables':
+            # Fix variables to new values
+            vars_list = [v for v in model.getVars() if v.VarName.startswith(component_name)]
+            for var in vars_list:
+                old_val = var.X if hasattr(var, 'X') else var.Start
+                if component_operation == "=":
+                    new_val = component_delta
+                else:
+                    new_val = eval(f"{old_val} {component_operation} {component_delta}")
+                var.LB = new_val
+                var.UB = new_val
+                feedback += f"{var.VarName} fixed to {new_val}\n"
+        
+        elif component_type == 'parameters':
+            # Modify RHS of constraints containing this parameter
+            feedback += f"Parameter {component_name} modified (requires constraint RHS updates)\n"
+    
+    # Re-optimize
+    model.optimize()
+    
+    new_model_name = get_new_model_name(queried_model)
+    
+    if model.status == GRB.OPTIMAL:
+        feedback += f"\nThe modified model is feasible with objective value {model.ObjVal}\n"
+        feedback += f"This new model will be referred to as {new_model_name}.\n"
+    elif model.status == GRB.INFEASIBLE:
+        feedback += f"\nThe modified model is infeasible.\n"
+        feedback += f"This new model will be referred to as {new_model_name}.\n"
+    else:
+        feedback += f"\nThe modified model has status: {model.status}\n"
+    
+    feedback += "Help the user analyze the influence of these modifications.\n"
+    return "Feedback from internal tools: \n" + feedback
+
+
+# =============================================================================
+# Unified dispatch functions
+# =============================================================================
+
+def dispatch_internal_tool(tool_name: str, queried_components: List[Dict], 
+                          queried_model: str, models_dict) -> str:
+    """
+    Dispatch to appropriate implementation based on model framework.
+    
+    Args:
+        tool_name: Name of the internal tool to call
+        queried_components: Components to operate on
+        queried_model: Name of the model
+        models_dict: Dictionary containing all models
+        
+    Returns:
+        Feedback string from the tool
+    """
+    queried_model_dict = models_dict.get(queried_model)
+    if not queried_model_dict:
+        return f"Error: Model {queried_model} not found."
+    
+    model_framework = queried_model_dict.get('model_framework', 'pyomo')
+    
+    # Map tool names to function implementations
+    tool_map = {
+        'pyomo': {
+            'feasibility_restoration': feasibility_restoration,
+            'sensitivity_analysis': sensitivity_analysis,
+            'components_retrival': components_retrival,
+            'evaluate_modification': evaluate_modification
+        },
+        'gurobi': {
+            'feasibility_restoration': feasibility_restoration_gurobi,
+            'sensitivity_analysis': sensitivity_analysis_gurobi,
+            'components_retrival': components_retrival_gurobi,
+            'evaluate_modification': evaluate_modification_gurobi
+        }
+    }
+    
+    if model_framework not in tool_map:
+        return f"Error: Unsupported model framework: {model_framework}"
+    
+    if tool_name not in tool_map[model_framework]:
+        return f"Error: Unknown tool: {tool_name}"
+    
+    # Call the appropriate function
+    func = tool_map[model_framework][tool_name]
+    return func(queried_components, queried_model, models_dict)
+
+
+

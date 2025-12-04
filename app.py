@@ -44,8 +44,8 @@ if "models_dict" not in st.session_state:
 if "code" not in st.session_state:
     st.session_state["code"] = ""
 
-st.sidebar.subheader("Load Pyomo File")
-uploaded_file = st.sidebar.file_uploader("Upload Model", type=["py"])
+st.sidebar.subheader("Load Optimization Model")
+uploaded_file = st.sidebar.file_uploader("Upload Model (Pyomo or Gurobi)", type=["py"])
 uploaded_json = st.sidebar.file_uploader("Upload JSON", type=["json"])
 st.session_state['py_path'] = None
 st.session_state['fn_names'] = ["feasibility_restoration",
@@ -83,9 +83,14 @@ def process():
 
     models_dict, code = initial_loading(uploaded_file)
 
+    # Detect and display model framework
+    model_framework = models_dict['model_1'].get('model_framework', 'pyomo')
+    framework_display = "Pyomo" if model_framework == 'pyomo' else "Gurobipy"
+    
     with st.chat_message("user"):
-        st.markdown("I have uploaded a Pyomo model.")
-    st.session_state.messages.append({"role": "user", "content": "I have uploaded a Pyomo model."})
+        st.markdown(f"I have uploaded a {framework_display} model.")
+    st.session_state.messages.append({"role": "user", "content": f"I have uploaded a {framework_display} model."})
+    
     # interpret the model components
     models_dict, cnt, completion = st.session_state.Interpreter.generate_interpretation_exp(st.session_state,
                                                                                             models_dict, code)
@@ -117,10 +122,12 @@ def process():
                                       "content": st.session_state.models_dict["model_representation"]["model description"]})
 
     # append detailed chat history
-    st.session_state.chat_history.append("user: I have uploaded a Pyomo model.")
+    model_framework = models_dict['model_1'].get('model_framework', 'pyomo')
+    framework_display = "Pyomo" if model_framework == 'pyomo' else "Gurobipy"
+    st.session_state.chat_history.append(f"user: I have uploaded a {framework_display} model.")
     st.session_state.chat_history.append("assistant: " +
                                          st.session_state.models_dict["model_representation"]["model description"])
-    st.session_state.detailed_chat_history.append("user: I have uploaded a Pyomo model.")
+    st.session_state.detailed_chat_history.append(f"user: I have uploaded a {framework_display} model.")
     st.session_state.detailed_chat_history.append("assistant: " +
                                                   st.session_state.models_dict["model_representation"]["model description"])
 
@@ -147,9 +154,13 @@ def load_json():
 
     models_dict, code = initial_loading(uploaded_file)
 
+    # Detect and display model framework
+    model_framework = models_dict['model_1'].get('model_framework', 'pyomo')
+    framework_display = "Pyomo" if model_framework == 'pyomo' else "Gurobipy"
+
     with st.chat_message("user"):
-        st.markdown("I have uploaded a Pyomo model.")
-    st.session_state.messages.append({"role": "user", "content": "I have uploaded a Pyomo model."})
+        st.markdown(f"I have uploaded a {framework_display} model.")
+    st.session_state.messages.append({"role": "user", "content": f"I have uploaded a {framework_display} model."})
 
     skipJSON = json.load(uploaded_json)
     models_dict = feed_skipJSON(skipJSON, models_dict)
@@ -170,10 +181,12 @@ def load_json():
                                           "model description"]})
 
     # append detailed chat history
-    st.session_state.chat_history.append("user: I have uploaded a Pyomo model.")
+    model_framework = models_dict['model_1'].get('model_framework', 'pyomo')
+    framework_display = "Pyomo" if model_framework == 'pyomo' else "Gurobipy"
+    st.session_state.chat_history.append(f"user: I have uploaded a {framework_display} model.")
     st.session_state.chat_history.append("assistant: " +
                                          st.session_state.models_dict["model_representation"]["model description"])
-    st.session_state.detailed_chat_history.append("user: I have uploaded a Pyomo model.")
+    st.session_state.detailed_chat_history.append(f"user: I have uploaded a {framework_display} model.")
     st.session_state.detailed_chat_history.append("assistant: " +
                                                   st.session_state.models_dict["model_representation"][
                                                       "model description"])

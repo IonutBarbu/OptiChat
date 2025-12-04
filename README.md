@@ -16,6 +16,7 @@ If you found this work useful, please cite this [preprint](https://arxiv.org/abs
 - [Chat Example](#chat-example)
 - [Model Library](#model-library)
 - [Build Your Own Model and Test it](#build-your-own-model-and-test-it)
+- [Gurobi Support](#gurobi-support)
 - [Citation](#citation)
 
 # Overview
@@ -26,9 +27,13 @@ These models are usually developed by optimization experts but are used by pract
 As a result, practitioners often struggle to interact with and draw useful conclusions from optimization models independently.
 
 ## Scope
-Model: OptiChat supports feasible/infeasible optimization model written in [Pyomo](http://www.pyomo.org).
+**Supported Frameworks**: OptiChat now supports optimization models written in both:
+- [Pyomo](http://www.pyomo.org) - Full native support
+- [Gurobipy](https://www.gurobi.com/documentation/current/quickstart_mac/cs_python.html) - Native support with metadata requirements (see [Gurobi Support](#gurobi-support))
 
-Query: OptiChat supports diagnosing, retrieval, sensitivity, what-if and why-not queries, as exemplified in ([Query Example](#QuestionClass))
+**Model States**: OptiChat supports both feasible and infeasible optimization models.
+
+**Query Types**: OptiChat supports diagnosing, retrieval, sensitivity, what-if and why-not queries, as exemplified in ([Query Example](#QuestionClass))
 
 # Installation
 <a name="installation"></a>
@@ -42,9 +47,9 @@ Query: OptiChat supports diagnosing, retrieval, sensitivity, what-if and why-not
 
 # Tutorial
 <a name="tutorial"></a>
-1. Browse files under Upload Model: Select your model (only support pyomo version .py file). There are a number of models in **Feas** and **Infeas** folders for you to test.
+1. Browse files under Upload Model: Select your model (supports both Pyomo .py and Gurobipy .py files). There are a number of models in **Feas** and **Infeas** folders for you to test.
 
-2. Process: Load your model to generate the initial description and get familiar with the problem context
+2. Process: Load your model to generate the initial description and get familiar with the problem context. OptiChat will automatically detect whether your model is Pyomo or Gurobi.
 
 3. Chat: Submit your queries using the chat interface ([Query Example](#QuestionClass))
 
@@ -131,6 +136,59 @@ model.wd = Constraint(model.t, rule=wd_rule, doc="Worker balance - job different
 # Objective
 model.obj = Objective(expr=sum(10 * model.s[t] + (model.wage + model.sf[t]) * model.w[t] for t in model.t), sense=minimize)
 ```
+
+# Gurobi Support
+<a name="gurobi-support"></a>
+
+OptiChat now natively supports Gurobipy models alongside Pyomo models. The system automatically detects which framework you're using.
+
+## Quick Start with Gurobi
+
+1. **Create your Gurobi model** with the variable name `model`
+2. **Add OptiChat metadata** (required) to describe your model structure
+3. **Upload** the .py file to OptiChat
+
+## Metadata Requirements
+
+Gurobi models require an `_optichat_metadata` dictionary to help OptiChat understand your model:
+
+```python
+model._optichat_metadata = {
+    'sets': {...},
+    'parameters': {...},
+    'variables': {...},
+    'constraints': {...},
+    'objective': {...}
+}
+```
+
+## Example
+
+```python
+import gurobipy as gp
+from gurobipy import GRB
+
+model = gp.Model("production")
+
+# Your model definition...
+
+# Add metadata (required)
+model._optichat_metadata = {
+    'parameters': {
+        'demand': {
+            'description': 'Customer demand for each product',
+            'is_indexed': True,
+            'is_RHS': True,
+            'cons_in': ['demand_constraint']
+        }
+    },
+    # ... other components
+}
+```
+
+📖 **Full Documentation**: See [GUROBI_SUPPORT.md](GUROBI_SUPPORT.md) for complete details, examples, and best practices.
+
+📁 **Example Model**: Check out `examples/simple_gurobi_model.py` for a complete working example.
 
 # Citation
 <a name="citation"></a>

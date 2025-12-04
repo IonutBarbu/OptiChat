@@ -68,8 +68,8 @@ Here are the name of {component_type} that need to be described
     }
 
     model_interpretation_prompt = """
-You are an operations research expert and your role is to use PLAIN ENGLISH to interpret an optimization model written in Pyomo. 
-The Pyomo code is given below:
+You are an operations research expert and your role is to use PLAIN ENGLISH to interpret an optimization model written in Pyomo or Gurobipy. 
+The code is given below:
 
 -----
 {code}
@@ -303,7 +303,7 @@ Your task is to invoke the most appropriate tool correctly based on the user's q
     code_reminder_prompt = """{source_code}\n# YOUR CODE GOES HERE\n"""
 
     programmer_prompt = """
-    You're an optimization expert who helps your team to write pyomo code to answer users questions, such as
+    You're an optimization expert who helps your team to write Pyomo or Gurobipy code to answer users questions, such as
     - write code snippet to revise the model, only when the user doubts the model's optimal solution and provides a counterexample
     - write code snippet to print out the information useful for answering the user's question
 
@@ -314,8 +314,8 @@ Your task is to invoke the most appropriate tool correctly based on the user's q
     ```
     ==========
 
-    Here are some example questions and their answer codes:
-    ----- EXAMPLE 1 -----
+    Here are some example questions and their answer codes for PYOMO models:
+    ----- PYOMO EXAMPLE 1 -----
     Question: Why is it not recommended to use just one supplier for roastery 2?
 
     Answer Code:
@@ -346,7 +346,7 @@ else:
 print('If forcing only one supplier to supply roastery 2, the optimal objective value will become: ', model.obj())
 ```
 
-    ----- EXAMPLE 2 -----
+    ----- PYOMO EXAMPLE 2 -----
     Question: Why is it not recommended to have production cost larger than transportation cost in the optimal setting?
 
     Answer Code:
@@ -374,19 +374,84 @@ else:
 # I print out the new optimal objective value so that you can tell the user how the objective value changes.
 print('If forcing production cost be smaller than transportation cost, the optimal objective value will become: ', model.obj())
 ```
+
+    Here are some example questions and their answer codes for GUROBI models:
+    ----- GUROBI EXAMPLE 1 -----
+    Question: Why is it not recommended to use just one supplier for roastery 2?
+
+    Answer Code:
+```python
+# user is actually interested in the case that only one supplier can supply roastery 2 and does not believe the optimal solution.
+import gurobipy as gp
+from gurobipy import GRB
+
+# Add constraint to force only one supplier for roastery 2
+# Assume z variables are binary variables indicating supplier selection
+one_supplier_constrs = []
+supplier_vars = [v for v in model.getVars() if v.VarName.startswith('z') and 'roastery2' in v.VarName]
+model.addConstr(gp.quicksum(supplier_vars) <= 1, name='force_one_supplier')
+
+# standard code to solve Gurobi model. Don't change this code if you need to solve a model.
+model.Params.TimeLimit = 300  # 5min time limit
+model.optimize()
+
+# always check the optimization status and optimal objective value first
+if model.status == GRB.OPTIMAL:
+    print('Optimal Objective Value: ', model.ObjVal)
+    print('If forcing only one supplier to supply roastery 2, the optimal objective value becomes: ', model.ObjVal)
+elif model.status == GRB.INFEASIBLE:
+    print("Model is infeasible, no optimal objective value is available.")
+elif model.status == GRB.TIME_LIMIT:
+    print("Time limit reached. Best objective value found: ", model.ObjVal)
+else:
+    print("Model has status: ", model.status)
+```
+
+    ----- GUROBI EXAMPLE 2 -----
+    Question: Why is it not recommended to have production cost larger than transportation cost in the optimal setting?
+
+    Answer Code:
+```python
+# user does not believe the optimal solution obtained when production cost smaller than transportation cost.
+# so we force production cost to be greater than transportation cost to see what will happen.
+import gurobipy as gp
+from gurobipy import GRB
+
+# Assuming production and transportation are variables or expressions in the model
+# Add constraint forcing production cost >= transportation cost
+prod_vars = [v for v in model.getVars() if 'production' in v.VarName.lower()]
+trans_vars = [v for v in model.getVars() if 'transportation' in v.VarName.lower()]
+model.addConstr(gp.quicksum(prod_vars) >= gp.quicksum(trans_vars), name='force_prod_gt_trans')
+
+# standard code to solve Gurobi model. Don't change this code if you need to solve a model.
+model.Params.TimeLimit = 300  # 5min time limit
+model.optimize()
+
+# always check the optimization status and optimal objective value first
+if model.status == GRB.OPTIMAL:
+    print('Optimal Objective Value: ', model.ObjVal)
+    print('If forcing production cost >= transportation cost, the optimal objective value becomes: ', model.ObjVal)
+elif model.status == GRB.INFEASIBLE:
+    print("Model is infeasible, no optimal objective value is available.")
+elif model.status == GRB.TIME_LIMIT:
+    print("Time limit reached. Best objective value found: ", model.ObjVal)
+else:
+    print("Model has status: ", model.status)
+```
     
-    - Code reminder has provided you with the source code of the pyomo model
+    - Code reminder has provided you with the source code of the optimization model (Pyomo or Gurobi)
     - Your written code will be added to the lines with substring: "# YOUR CODE GOES HERE"
     So, you don't need to repeat the source code that has already been provided by Code reminder.
-    - The standard code for re-solving the model has been given in the examples, 
-    So, you MUST use the standard code to re-solve the model to avoid undesired execution errors and long execution result.
+    - The standard code for re-solving the model has been given in the examples
+    So, you MUST use the standard code appropriate for the framework (Pyomo or Gurobi) to re-solve the model to avoid undesired execution errors and long execution result.
     - Your written code should be accompanied by comments to explain the purpose of the code.
     - Evaluator will execute the new code for you and read the execution result.
     So, you MUST print out the model information that you believe is necessary for the user's question.
+    - IMPORTANT: Check the model framework (Pyomo vs Gurobi) in the source code and write code appropriate for that framework.
     """
 
     evaluator_prompt = """
-You're an optimization expert who helps your team to review pyomo code,
+You're an optimization expert who helps your team to review Pyomo or Gurobipy code,
 based on the execution result of the code provided by the programmer.
 
 Is the code bug-free and valid to answer the user's query?
