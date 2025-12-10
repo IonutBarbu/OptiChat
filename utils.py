@@ -16,6 +16,7 @@ import re
 from pyomo.core.expr.visitor import identify_mutable_parameters, replace_expressions, clone_expression
 # GPT
 from openai import OpenAI
+from llm_client import UnifiedLLMClient
 from dotenv import load_dotenv, find_dotenv
 _ = load_dotenv(find_dotenv())  # read local .env file
 import tiktoken
