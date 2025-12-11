@@ -176,17 +176,17 @@ We now determine the MIP model for the facility location problem, by defining th
 
 # MIP  model formulation
 
-m = gp.Model('facility_location')
+model = gp.Model('facility_location')
 
-select = m.addVars(num_facilities, vtype=GRB.BINARY, name='Select')
-assign = m.addVars(cartesian_prod, ub=1, vtype=GRB.CONTINUOUS, name='Assign')
+select = model.addVars(num_facilities, vtype=GRB.BINARY, name='Select')
+assign = model.addVars(cartesian_prod, ub=1, vtype=GRB.CONTINUOUS, name='Assign')
 
-m.addConstrs((assign[(c,f)] <= select[f] for c,f in cartesian_prod), name='Setup2ship')
-m.addConstrs((gp.quicksum(assign[(c,f)] for f in range(num_facilities)) == 1 for c in range(num_customers)), name='Demand')
+model.addConstrs((assign[(c,f)] <= select[f] for c,f in cartesian_prod), name='Setup2ship')
+model.addConstrs((gp.quicksum(assign[(c,f)] for f in range(num_facilities)) == 1 for c in range(num_customers)), name='Demand')
 
-m.setObjective(select.prod(setup_cost)+assign.prod(shipping_cost), GRB.MINIMIZE)
+model.setObjective(select.prod(setup_cost)+assign.prod(shipping_cost), GRB.MINIMIZE)
 
-m.optimize()
+model.optimize()
 
 """## Analysis
 
