@@ -5,10 +5,11 @@ from openai import Client, OpenAI
 from llm_client import UnifiedLLMClient
 from prompts import get_prompts
 from internal_tools import feasibility_restoration, sensitivity_analysis, components_retrival, evaluate_modification
-from internal_tools import syntax_guidance, fnArgsDecoder
+from internal_tools import syntax_guidance, fnArgsDecoder, dispatch_internal_tool
 from extractor import extract_component_descriptions, insert_code, run_with_exec
 import json
 import re
+import traceback
 #import streamlit as st
 
 
@@ -721,7 +722,8 @@ class Engineer(Agent):
                 print(f'function name = {fn_name}')
                 print(f'function arguments = {fn_args}')
             else:
-                raise Exception("No tool call executed by Operator, perhaps because of the 'auto' tool choice!")
+                raise Exception("LLM failed to execute any tool call despite tool_choice='required'. " \
+                "This may indicate the LLM cannot parse the tools, the context is too large, or the query doesn't match available tool capabilities.")
         else:
             raise Exception("Client type not supported!")
         return fn_name, fn_args
@@ -786,23 +788,21 @@ class Engineer(Agent):
                 self.unparsed_queried_components = json.loads(fn_args).get("queried_components")
                 self.queried_components = fnArgsDecoder(self.unparsed_queried_components)
 
-                # pass the function name and arguments to the function
-                if fn_name == 'feasibility_restoration':
-                    fn_output = feasibility_restoration(self.queried_components, self.queried_model, models_dict)
-                elif fn_name == 'sensitivity_analysis':
-                    fn_output = sensitivity_analysis(self.queried_components, self.queried_model, models_dict)
-                elif fn_name == 'components_retrival':
-                    fn_output = components_retrival(self.queried_components, self.queried_model, models_dict)
-                elif fn_name == 'evaluate_modification':
-                    fn_output = evaluate_modification(self.queried_components, self.queried_model, models_dict)
-                else:
-                    raise Exception("invalid function name")
+                # Dispatch to appropriate implementation (Pyomo or Gurobi) based on model framework
+                valid_tools = ['feasibility_restoration', 'sensitivity_analysis', 'components_retrival', 'evaluate_modification']
+                if fn_name not in valid_tools:
+                    raise Exception(f"Invalid function name: {fn_name}")
+                
+                # Log the model framework being used
+                model_framework = models_dict.get(self.queried_model, {}).get('model_framework', 'unknown')
+                print(f"Dispatching {fn_name} for {model_framework} model: {self.queried_model}")
+                
+                fn_output = dispatch_internal_tool(fn_name, self.queried_components, self.queried_model, models_dict)
                 self.operator_success = True
                 return fn_output
 
             except Exception as e:
                 print(e)
-                import traceback
                 err = traceback.format_exc()
                 # embed the error message into the syntax reminder in team_conversation
                 error_response = f"\n\nProblematic queried_components: {self.unparsed_queried_components} \n\nError: {err}"
