@@ -54,3 +54,4 @@ __gams*
 index*.bin
 *.ilp
 .env
+*.lp
