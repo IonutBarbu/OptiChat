@@ -2,6 +2,7 @@ import copy
 import time
 from typing import Dict, Optional, Union, List
 from openai import Client, OpenAI
+from llm_client import UnifiedLLMClient
 from prompts import get_prompts
 from internal_tools import feasibility_restoration, sensitivity_analysis, components_retrival, evaluate_modification
 from internal_tools import syntax_guidance, fnArgsDecoder
@@ -56,7 +57,7 @@ class Agent:
         #     print(f'{message["role"]}: {message["content"]}')
         # print("=" * 10)
 
-        if type(self.client) in [OpenAI, Client]:
+        if type(self.client) in [OpenAI, Client, UnifiedLLMClient]:
             completion = self.client.chat.completions.create(
                 model=self.llm,
                 messages=messages,
@@ -126,7 +127,7 @@ class Agent:
         else:
             response_format = {"type": "text"}
 
-        if type(self.client) in [OpenAI, Client]:
+        if type(self.client) in [OpenAI, Client, UnifiedLLMClient]:
             if self.llm not in ["o3"]:
                 completion = self.client.chat.completions.create(
                 model=self.llm,
@@ -693,7 +694,7 @@ class Engineer(Agent):
                 raise Exception("Invalid mode!")
             tool_choice = "required"
 
-        if type(self.client) in [OpenAI, Client]:
+        if type(self.client) in [OpenAI, Client, UnifiedLLMClient]:
             if self.llm not in ["o3"]:
                 completion = self.client.chat.completions.create(
                 model=self.llm,

@@ -5,6 +5,7 @@ from io import StringIO
 import time
 import tempfile
 import io
+from llm_client import LLMClientFactory, UnifiedLLMClient
 from extractor import initial_loading
 from extractor import update_model_representation, get_skipJSON, feed_skipJSON
 from utils import get_agents
@@ -19,8 +20,7 @@ def string_generator(long_string, chunk_size=50):
         time.sleep(0.1)  # Optionally add a small delay between each yield
 
 
-client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
-st.session_state['client'] = client
+# Initialize session state defaults
 st.session_state['temperature'] = 0.1  # by default
 st.session_state['json_mode'] = True  # by default
 st.session_state['illustration_stream'] = True  # by default
@@ -33,8 +33,55 @@ st.set_page_config(layout='wide')
 
 st.title("OptiChat: Talk to your Optimization Model")
 
+# LLM Provider Selection
+st.sidebar.subheader('LLM Provider')
+provider = st.sidebar.selectbox(
+    label="Provider",
+    options=["openai", "bedrock"],
+    index=0
+)
 
-gpt_model = st.sidebar.selectbox(label="GPT-Model", options=["gpt-4-turbo-preview", "gpt-4-turbo", "gpt-4-1106-preview", "gpt-4", "gpt-3.5-turbo", "gpt-3.5-turbo-16k"], )
+# Get available models for selected provider
+available_models = LLMClientFactory.get_available_models(provider)
+
+# Model selection based on provider
+if provider == "openai":
+    default_model = "gpt-4-turbo-preview"
+    model_label = "OpenAI Model"
+else:  # bedrock
+    default_model = "gpt-oss-120b"
+    model_label = "Bedrock Model"
+
+selected_model = st.sidebar.selectbox(
+    label=model_label,
+    options=available_models,
+    index=available_models.index(default_model) if default_model in available_models else 0
+)
+
+st.session_state["gpt_model"] = selected_model
+st.session_state["provider"] = provider
+
+# Create LLM client using factory
+try:
+    llm_client = LLMClientFactory.create_client(
+        provider=provider,
+        model_name=selected_model,
+        api_key=os.environ.get("OPENAI_API_KEY") if provider == "openai" else None,
+        region=os.environ.get("AWS_REGION", "eu-central-1") if provider == "bedrock" else None
+    )
+    # Wrap in unified client for backward compatibility
+    client = UnifiedLLMClient(llm_client)
+    st.session_state['client'] = client
+except Exception as e:
+    st.sidebar.error(f"Error initializing LLM client: {str(e)}")
+    st.sidebar.info("Make sure you have set the appropriate environment variables (OPENAI_API_KEY or AWS credentials)")
+    # Fallback to OpenAI if available
+    if provider == "openai" and os.environ.get("OPENAI_API_KEY"):
+        client = UnifiedLLMClient(LLMClientFactory.create_client("openai", "gpt-4-turbo-preview"))
+        st.session_state['client'] = client
+    else:
+        st.stop()
+gpt_model = selected_model
 st.session_state["gpt_model"] = gpt_model
 # Set a default model
 if "gpt_model" not in st.session_state:

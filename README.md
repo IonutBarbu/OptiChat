@@ -36,17 +36,32 @@ Query: OptiChat supports diagnosing, retrieval, sensitivity, what-if and why-not
 2. Install python packages ```pip install -r requirements.txt```
 3. Install Gurobi following the instructions in the youtube videos  [here](https://support.gurobi.com/hc/en-us/articles/4534161999889). For windows without admin access, follow the instructions
 [here](https://support.gurobi.com/hc/en-us/articles/360060996432-How-do-I-install-Gurobi-on-Windows-without-administrator-credentials-)
-4. Apply for an OpenAI API key [here](https://platform.openai.com/).  Add the key to your environment variables as ```OPENAI_API_KEY```
+4. **Configure LLM Provider**: OptiChat supports both OpenAI and AWS Bedrock:
+
+   **For OpenAI:**
+   - Apply for an API key [here](https://platform.openai.com/)
+   - Add the key to your environment variables as ```OPENAI_API_KEY```
+   
+   **For AWS Bedrock:**
+   - Configure AWS credentials using one of these methods:
+     - Set environment variables: `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`
+     - Or use AWS CLI: `aws configure`
+   - Ensure you have access to Bedrock models in your AWS account
+
 5. To check whether the installation of gurobi and GPT is successful, at the root directory, run ```pytest tests/```. If the test passes, you are good to go
 6. Run app.py ```streamlit run app.py``` to use the chatbot
 
 # Tutorial
 <a name="tutorial"></a>
-1. Browse files under Upload Model: Select your model (only support pyomo version .py file). There are a number of models in **Feas** and **Infeas** folders for you to test.
+1. **Select LLM Provider**: In the sidebar, choose between "openai" or "bedrock" and select your preferred model:
+   - **OpenAI**: GPT-4 Turbo, GPT-4, GPT-3.5, O1 models
+   - **Bedrock**: Claude Sonnet 4, GPT-OSS-20B, GPT-OSS-120B
 
-2. Process: Load your model to generate the initial description and get familiar with the problem context
+2. **Browse files under Upload Model**: Select your model (supports both Pyomo .py and Gurobipy .py files). There are a number of models in **Feas** and **Infeas** folders for you to test.
 
-3. Chat: Submit your queries using the chat interface ([Query Example](#QuestionClass))
+3. **Process**: Load your model to generate the initial description and get familiar with the problem context. OptiChat will automatically detect whether your model is Pyomo or Gurobi.
+
+4. **Chat**: Submit your queries using the chat interface ([Query Example](#QuestionClass))
 
 Other buttons are intended for development and debugging purposes.
 
