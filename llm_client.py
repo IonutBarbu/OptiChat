@@ -115,7 +115,7 @@ class BedrockLLMClient(LLMClient):
     def __init__(
         self, 
         model_name: str = "gpt-oss-120b", 
-        max_tokens: int = 128000,
+        max_tokens: int = 32768,
         **kwargs
     ):
         super().__init__(model_name, **kwargs)
